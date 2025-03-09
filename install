@@ -47,18 +47,25 @@ zfs create -o mountpoint=/ -o compression=zstd think/root
 zfs create -o mountpoint=/home -o compression=zstd think/home
 zpool export think
 
+set e
 # ------------------------------------------------------------------------------
 # ARCHINSTALL CONFIGURATION
 # ------------------------------------------------------------------------------
 echo "Starting archinstall..."
 archinstall \
-    --config https://raw.githubusercontent.com/archlinux/archinstall/master/docs/examples/guided.json \
     --timezone America/Los_Angeles \
     --lang en_US.UTF-8 \
     --hostname Think \
     --mount-point /mnt \
     --packages neovim networkmanager intel-ucode \
-    --no-reboot
+    --no-reboot \
+    --nic=enp0s31f6:dhcp \  # Verify interface with `ip link`
+    --kernel linux \
+    --profile minimal \
+    --audio pipewire \
+    --bootloader none \
+    --no-desktop \
+    --no-xorg
 
 # ------------------------------------------------------------------------------
 # POST-INSTALLATION (CHROOT)
