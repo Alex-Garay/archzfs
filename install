@@ -1,0 +1,109 @@
+#!/bin/bash
+set -e
+
+# ------------------------------------------------------------------------------
+# PRE-INSTALLATION (LIVE ENVIRONMENT)
+# ------------------------------------------------------------------------------
+if [[ $(uname -r) != *6.13.5* ]]; then
+    echo "ERROR: Live environment kernel doesn't match ZFS module version"
+    exit 1
+fi
+
+echo "Installing ZFS in live environment..."
+wget -q --show-progress \
+    https://github.com/n0xena/archzfs/releases/download/2.3.0_6.13.5-dkms/zfs-linux-2.3.0_6.13.5.arch1.1-1-x86_64.pkg.tar.zst \
+    https://github.com/n0xena/archzfs/releases/download/2.3.0_6.13.5-dkms/zfs-linux-headers-2.3.0_6.13.5.arch1.1-1-x86_64.pkg.tar.zst \
+    https://github.com/n0xena/archzfs/releases/download/2.3.0_6.13.5-dkms/zfs-utils-2.3.0-1-x86_64.pkg.tar.zst
+
+pacman -U --noconfirm *.pkg.tar.zst
+modprobe zfs
+
+# ------------------------------------------------------------------------------
+# DISK CONFIGURATION
+# ------------------------------------------------------------------------------
+DISK=/dev/nvme0n1  # CHANGE TO YOUR DISK
+EFI_PART="${DISK}p1"
+LUKS_PART="${DISK}p2"
+
+echo "Partitioning ${DISK}..."
+parted --script "${DISK}" \
+    mklabel gpt \
+    mkpart "EFI" fat32 1MiB 1GiB \
+    set 1 esp on \
+    mkpart "ROOT" 1GiB 100%
+
+echo "Setting up LUKS..."
+read -rsp "Enter LUKS passphrase: " luks_pass
+echo -n "$luks_pass" | cryptsetup luksFormat "${LUKS_PART}" -
+echo -n "$luks_pass" | cryptsetup open "${LUKS_PART}" cryptroot -
+
+# ------------------------------------------------------------------------------
+# ZFS SETUP (LUKS ONLY, NO NATIVE ENCRYPTION)
+# ------------------------------------------------------------------------------
+echo "Creating ZFS pool..."
+zpool create -f -O mountpoint=none -R /mnt think /dev/mapper/cryptroot
+
+zfs create -o mountpoint=/ -o compression=zstd think/root
+zfs create -o mountpoint=/home -o compression=zstd think/home
+zpool export think
+
+# ------------------------------------------------------------------------------
+# ARCHINSTALL CONFIGURATION
+# ------------------------------------------------------------------------------
+echo "Starting archinstall..."
+archinstall \
+    --config https://raw.githubusercontent.com/archlinux/archinstall/master/docs/examples/guided.json \
+    --timezone America/Los_Angeles \
+    --lang en_US.UTF-8 \
+    --hostname Think \
+    --mount-point /mnt \
+    --packages neovim networkmanager intel-ucode \
+    --no-reboot
+
+# ------------------------------------------------------------------------------
+# POST-INSTALLATION (CHROOT)
+# ------------------------------------------------------------------------------
+echo "Entering chroot..."
+arch-chroot /mnt /bin/bash <<EOF
+set -e
+
+# Install ZFS packages
+pacman -U --noconfirm /var/cache/pacman/pkg/zfs-*.pkg.tar.zst
+
+# Configure mkinitcpio (encrypt BEFORE zfs)
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont encrypt zfs filesystems)/' /etc/mkinitcpio.conf
+mkinitcpio -P
+
+# Install ZFSBootMenu via AUR
+pacman -S --noconfirm base-devel git efibootmgr
+git clone https://aur.archlinux.org/yay.git
+cd yay
+makepkg -si --noconfirm
+cd ..
+yay -S --noconfirm zfsbootmenu
+
+# Configure ZFSBootMenu
+mkdir -p /efi/EFI/ZBM
+zfsbootmenu install -d /efi
+zfsbootmenu generate
+
+# Create user with wheel group
+read -rsp "Enter password for user Levi: " user_pass
+useradd -m -G wheel -s /bin/bash Levi
+echo "Levi:${user_pass}" | chpasswd
+
+# Configure sudo for wheel group
+echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/wheel
+chmod 440 /etc/sudoers.d/wheel
+
+# Handle Secure Boot
+mount "${EFI_PART}" /efi
+sbctl create-keys
+sbctl sign -s /efi/EFI/ZBM/vmlinuz-linux
+sbctl sign -s /efi/EFI/ZBM/initramfs-linux.img
+EOF
+
+echo "Installation complete! Important notes:"
+echo "1. Keep kernel 6.13.5 permanently"
+echo "2. Enable NetworkManager: systemctl enable NetworkManager"
+echo "3. Set ZFS cache: zpool set cachefile=/etc/zfs/zpool.cache think"
