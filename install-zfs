@@ -4,9 +4,9 @@ pacman -S wget
 
 mkdir zfs-files
 
-wget -P ./zfs-files/ https://github.com/n0xena/archzfs/releases/download/2.3.1_6.13.7/zfs-dkms-2.3.1-2-x86_64.pkg.tar.zst
 wget -P ./zfs-files/ https://github.com/n0xena/archzfs/releases/download/2.3.1_6.13.7/zfs-utils-2.3.1-1-x86_64.pkg.tar.zst
-
+wget -P ./zfs-files/ https://github.com/n0xena/archzfs/releases/download/2.3.1_6.13.7/zfs-linux-2.3.1_6.13.7.arch1.1-1-x86_64.pkg.tar.zst
+wget -P ./zfs-files/ https://github.com/n0xena/archzfs/releases/download/2.3.1_6.13.7/zfs-linux-headers-2.3.1_6.13.7.arch1.1-1-x86_64.pkg.tar.zst
 pacman -U ~/zfs-files/*
 
 modprobe zfs
